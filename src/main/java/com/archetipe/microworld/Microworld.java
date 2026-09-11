@@ -1,6 +1,5 @@
 package com.archetipe.microworld;
 
-import com.archetipe.microworld.dimension.MicroWorldFloodFillScheduler;
 import com.archetipe.microworld.network.NetworkHelper;
 import com.archetipe.microworld.registry.ModBlockEntities;
 import com.archetipe.microworld.registry.ModBlocks;
@@ -75,17 +74,6 @@ public class Microworld {
 
     public void onServerStarting(ServerStartingEvent event) {
         LOGGER.info("HELLO from server starting");
-
-        // MUST reset here: FRONTIER/VISITED in MicroWorldFloodFillScheduler
-        // are static, so without this they silently carry over from one
-        // Minecraft "world" into the next whenever both run inside the
-        // same JVM session -- confirmed directly (a second world made
-        // without fully restarting the client generated nothing but the
-        // guaranteed floor block, because every coordinate the flood fill
-        // tried was already marked VISITED from the first world). A new
-        // IntegratedServer is created for every world load though, even
-        // within one running client, so this fires every time it needs to.
-        MicroWorldFloodFillScheduler.reset();
     }
 
     // NOTE: Two attempts at forcing a low view/simulation distance

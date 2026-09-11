@@ -1,6 +1,5 @@
 package com.archetipe.microworld.registry;
 
-import com.archetipe.microworld.block.entity.MagnifiedBlockEntity;
 import com.archetipe.microworld.block.entity.MicroWorldBlockEntity;
 import com.archetipe.microworld.block.entity.MiniatureBlockEntity;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -20,14 +19,6 @@ public class ModBlockEntities {
             () -> BlockEntityType.Builder.of(
                     MicroWorldBlockEntity::new,
                     BuiltInRegistries.BLOCK.get(ResourceLocation.parse("microworld:micro_world_block"))
-            ).build(null)
-    );
-
-    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<MagnifiedBlockEntity>>
-            MAGNIFIED_BLOCK_ENTITY = BLOCK_ENTITIES.register("magnified_block",
-            () -> BlockEntityType.Builder.of(
-                    MagnifiedBlockEntity::new,
-                    BuiltInRegistries.BLOCK.get(ResourceLocation.parse("microworld:magnified_block"))
             ).build(null)
     );
 

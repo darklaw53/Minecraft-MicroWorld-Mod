@@ -1,7 +1,6 @@
 package com.archetipe.microworld.event;
 
 import com.archetipe.microworld.Microworld;
-import com.archetipe.microworld.dimension.MicroWorldFloodFillScheduler;
 import com.archetipe.microworld.dimension.ModDimensions;
 import com.archetipe.microworld.util.CoordinateMapper;
 import net.minecraft.core.BlockPos;
@@ -39,7 +38,6 @@ public class MicroWorldEventHandler {
         // One overworld block X/Z maps 1:1 onto one microworld chunk X/Z
         // (see MicroWorldFloodFillScheduler), so the chunk's own
         // coordinates ARE the overworld ox/oz to seed at.
-        MicroWorldFloodFillScheduler.seed(new BlockPos(pos.x, targetOy, pos.z));
     }
 
     @SubscribeEvent
@@ -49,8 +47,6 @@ public class MicroWorldEventHandler {
         if (microLevel == null) return;
         ServerLevel overworld = server.getLevel(Level.OVERWORLD);
         if (overworld == null) return;
-
-        MicroWorldFloodFillScheduler.tick(microLevel, overworld);
     }
 
     /**
@@ -64,10 +60,6 @@ public class MicroWorldEventHandler {
         List<ServerPlayer> players = microLevel.players();
         if (!players.isEmpty()) {
             return (int) Math.floor(players.get(0).getY() / CoordinateMapper.SCALE);
-        }
-        Integer hint = MicroWorldFloodFillScheduler.peekTeleportTargetOy();
-        if (hint != null) {
-            return hint;
         }
         return (overworld.getMinBuildHeight() + overworld.getMaxBuildHeight()) / 2;
     }

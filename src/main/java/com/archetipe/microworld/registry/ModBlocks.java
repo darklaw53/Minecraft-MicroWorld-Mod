@@ -1,6 +1,5 @@
 package com.archetipe.microworld.registry;
 
-import com.archetipe.microworld.block.MagnifiedBlock;
 import com.archetipe.microworld.block.MicroWorldBlock;
 import com.archetipe.microworld.block.MiniatureBlock;
 import com.archetipe.microworld.block.SolidAirBlock;
@@ -28,16 +27,6 @@ public class ModBlocks {
             BLOCKS.register("solid_air",
                     () -> new SolidAirBlock(BlockBehaviour.Properties.of()
                             .mapColor(MapColor.NONE)
-                            .strength(1.0f)
-                            .noOcclusion()
-                            .noLootTable()
-                    )
-            );
-
-    public static final DeferredBlock<Block> MAGNIFIED_BLOCK =
-            BLOCKS.register("magnified_block",
-                    () -> new MagnifiedBlock(BlockBehaviour.Properties.of()
-                            .mapColor(MapColor.STONE)
                             .strength(1.0f)
                             .noOcclusion()
                             .noLootTable()
