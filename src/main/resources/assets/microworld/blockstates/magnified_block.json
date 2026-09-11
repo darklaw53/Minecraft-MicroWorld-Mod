@@ -1,0 +1,7 @@
+{
+  "loader": "microworld:magnified_model",
+  "base_model": {
+    "textures": { "particle": "minecraft:block/stone" },
+    "elements": []
+  }
+}

@@ -1,6 +1,7 @@
 package com.archetipe.microworld.network;
 
 import com.archetipe.microworld.Microworld;
+import com.archetipe.microworld.dimension.ModDimensions;
 import com.archetipe.microworld.world.EnlargedBlockGenerator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -12,6 +13,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
+import com.archetipe.microworld.util.PendingMegablock;
+import com.archetipe.microworld.util.PendingMegablockRegistry;
+import net.minecraft.server.MinecraftServer;
 
 import java.lang.reflect.Method;
 
@@ -86,51 +90,33 @@ public record MicroWorldDataPayload(
     // ---- Server-side handler ----
     public static void handleOnServer(MicroWorldDataPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = getPlayerFromContext(context);
-            if (player == null) {
-                // Should never happen on a server-bound packet
-                throw new IllegalStateException("Unable to retrieve ServerPlayer from context");
-            }
+            if (!(context.player() instanceof ServerPlayer player)) return;
 
-            // Validate scale and consistency between scale and pixelData length before
-            // doing anything with the data. Never trust these values from the client.
-            if (payload.scale <= 0 || payload.scale > MAX_SCALE) {
-                Microworld.LOGGER.warn(
-                        "Rejected MicroWorldDataPayload from {}: invalid scale {}",
-                        player.getGameProfile().getName(),
-                        payload.scale
-                );
-                return;
-            }
+            if (payload.scale <= 0 || payload.scale > MAX_SCALE) return;
+            int expected = payload.scale * payload.scale * payload.scale;
+            if (payload.pixelData.length != expected) return;
 
-            int expectedLength = payload.scale * payload.scale * payload.scale;
-            if (payload.pixelData.length != expectedLength) {
-                Microworld.LOGGER.warn(
-                        "Rejected MicroWorldDataPayload from {}: pixelData length {} does not match scale {} (expected {})",
-                        player.getGameProfile().getName(),
-                        payload.pixelData.length,
-                        payload.scale,
-                        expectedLength
-                );
-                return;
-            }
-
-            // Get the server level (fallback for different method names)
-            ServerLevel level;
-            try {
-                level = player.serverLevel();
-            } catch (NoSuchMethodError e) {
-                level = (ServerLevel) player.level();
-            }
+            MinecraftServer server = player.getServer();
+            if (server == null) return;
+            ServerLevel microLevel = server.getLevel(ModDimensions.MICRO_WORLD_LEVEL);
+            if (microLevel == null) return;
 
             EnlargedBlockGenerator.buildStructure(
-                    level,
+                    microLevel,
                     payload.origin,
                     payload.sourceState,
                     payload.scale,
                     payload.pixelData,
                     payload.originalPos
             );
+
+            PendingMegablockRegistry.set(player.getUUID(), new PendingMegablock(
+                    payload.origin,
+                    payload.sourceState,
+                    payload.scale,
+                    payload.pixelData.clone(),
+                    payload.originalPos
+            ));
         });
     }
 

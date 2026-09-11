@@ -1,0 +1,7 @@
+{
+  "loader": "microworld:miniature_model",
+  "base_model": {
+    "parent": "block/block",
+    "textures": { "particle": "block/stone" }
+  }
+}

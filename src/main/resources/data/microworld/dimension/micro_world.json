@@ -1,0 +1,10 @@
+{
+  "type": "microworld:micro_world",
+  "generator": {
+    "type": "microworld:void_generator",
+    "biome_source": {
+      "type": "minecraft:fixed",
+      "biome": "minecraft:plains"
+    }
+  }
+}
