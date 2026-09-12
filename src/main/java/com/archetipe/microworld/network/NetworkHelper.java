@@ -24,6 +24,18 @@ public final class NetworkHelper {
                 PlaceMiniaturePayload.CODEC,
                 PlaceMiniaturePayload::handleOnServer
         );
+
+        registrar.playToServer(
+                StartDiggingPayload.TYPE,
+                StartDiggingPayload.CODEC,
+                StartDiggingPayload::handleOnServer
+        );
+
+        registrar.playToServer(
+                BreakSubVoxelPayload.TYPE,
+                BreakSubVoxelPayload.CODEC,
+                BreakSubVoxelPayload::handleOnServer
+        );
     }
 
     public static void sendMicroWorldData(
@@ -39,5 +51,15 @@ public final class NetworkHelper {
 
     public static void sendPlaceMiniature(BlockPos placePos) {
         PacketDistributor.sendToServer(new PlaceMiniaturePayload(placePos));
+    }
+
+    public static void sendStartDigging(BlockPos pos, BlockState state, int scale,
+                                        short[] pixelData, BlockPos originalPos) {
+        PacketDistributor.sendToServer(
+                new StartDiggingPayload(pos, state, scale, pixelData, originalPos));
+    }
+
+    public static void sendBreakSubVoxel(BlockPos pos, int sx, int sy, int sz) {
+        PacketDistributor.sendToServer(new BreakSubVoxelPayload(pos, sx, sy, sz));
     }
 }

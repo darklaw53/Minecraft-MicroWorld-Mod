@@ -53,20 +53,25 @@ public record PlaceMiniaturePayload(BlockPos placePos) implements CustomPacketPa
 
             MinecraftServer server = player.getServer();
             if (server == null) return;
-            ServerLevel source = server.getLevel(ModDimensions.MICRO_WORLD_LEVEL);
-            if (source == null) return;
+            ServerLevel microLevel = server.getLevel(ModDimensions.MICRO_WORLD_LEVEL);
+            if (microLevel == null) return;
 
             BlockState miniState = ModBlocks.MINIATURE_BLOCK.get().defaultBlockState();
             level.setBlock(target, miniState, Block.UPDATE_ALL);
 
             BlockEntity be = level.getBlockEntity(target);
             if (be instanceof MiniatureBlockEntity mini) {
-                // Remember where the source megablock lives so future refreshes
-                // (if enabled) know where to look. Does NOT read the megablock.
-                mini.setSourceLocation(source.dimension(), pending.origin(), pending.scale());
-                // Populate voxels from the data the client already sent. Zero
-                // world reads, zero chunk loads, ready this tick.
-                mini.populateFromPixelData(pending.source(), pending.pixelData(), pending.scale());
+                mini.setSourceLocation(microLevel.dimension(), pending.origin(), pending.scale());
+                // Pass the megablock's ServerLevel and origin so the BE can
+                // read per-voxel hardness (and later, per-voxel block types)
+                // directly from the megablock. The megablock was already
+                // built by MicroWorldDataPayload before this packet was sent.
+                mini.populateFromPixelData(
+                        pending.source(),
+                        pending.pixelData(),
+                        pending.scale(),
+                        microLevel,
+                        pending.origin());
             }
 
             PendingMegablockRegistry.clear(player.getUUID());

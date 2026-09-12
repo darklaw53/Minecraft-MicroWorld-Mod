@@ -15,7 +15,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
@@ -27,6 +27,7 @@ import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.neoforge.client.model.data.ModelData;
 import net.neoforged.neoforge.client.model.data.ModelProperty;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -38,14 +39,11 @@ public class MiniatureBlockEntity extends BlockEntity {
     private int scale = 16;
 
     private volatile Map<Integer, MiniatureVoxel> voxels = Map.of();
-
-    // Voxel-shape collision derived from the current voxel map. Built lazily
-    // on first query and invalidated whenever the voxel map is replaced.
+    private volatile Map<Integer, Float> voxelHardness = Map.of();
     private volatile VoxelShape collisionShapeCache;
 
     private ResourceKey<Level> sourceDimension;
     private BlockPos sourceOrigin;
-
     private int tickCounter;
 
     public MiniatureBlockEntity(BlockPos pos, BlockState state) {
@@ -55,57 +53,13 @@ public class MiniatureBlockEntity extends BlockEntity {
     public int getScale() { return scale; }
     public Map<Integer, MiniatureVoxel> getVoxels() { return voxels; }
 
-    /**
-     * Returns a VoxelShape representing all occupied voxels at their scaled
-     * positions within the block. Cached; rebuilt on the next query after the
-     * voxel map changes.
-     *
-     * The shape is derived from the raw voxel map (not VisualBaker-culled),
-     * because collision is a server-side concern and VisualBaker is
-     * client-only. For a fence mini this produces the fence's collision
-     * shape, which is what the source block itself would give you.
-     */
-    public VoxelShape getCollisionShape() {
-        VoxelShape cached = collisionShapeCache;
-        if (cached != null) return cached;
-
-        Map<Integer, MiniatureVoxel> v = voxels;
-        int s = scale;
-        if (v.isEmpty() || s <= 0) {
-            VoxelShape empty = Shapes.empty();
-            collisionShapeCache = empty;
-            return empty;
-        }
-
-        // Fast path: fully occupied 16^3 grid -> standard full block shape.
-        if (v.size() == s * s * s) {
-            VoxelShape full = Shapes.block();
-            collisionShapeCache = full;
-            return full;
-        }
-
-        double vs = 1.0 / s;
-        VoxelShape shape = Shapes.empty();
-        for (Integer idxObj : v.keySet()) {
-            int idx = idxObj;
-            int x = idx % s;
-            int rem = idx / s;
-            int z = rem % s;
-            int y = rem / s;
-
-            double x0 = x * vs, y0 = y * vs, z0 = z * vs;
-            VoxelShape box = Shapes.box(x0, y0, z0, x0 + vs, y0 + vs, z0 + vs);
-            shape = Shapes.joinUnoptimized(shape, box, BooleanOp.OR);
-        }
-
-        VoxelShape result = shape.optimize();
-        collisionShapeCache = result;
-        return result;
+    public float getVoxelHardness(int voxelIdx) {
+        Float h = voxelHardness.get(voxelIdx);
+        return h != null ? h : -1f;
     }
 
-    private void invalidateShapeCache() {
-        collisionShapeCache = null;
-    }
+    public ResourceKey<Level> getSourceDimension() { return sourceDimension; }
+    public BlockPos getSourceOrigin() { return sourceOrigin; }
 
     public void setSourceLocation(ResourceKey<Level> dimension, BlockPos origin, int scale) {
         this.sourceDimension = dimension;
@@ -114,18 +68,52 @@ public class MiniatureBlockEntity extends BlockEntity {
         setChanged();
     }
 
-    public void populateFromPixelData(BlockState sourceState, short[] pixelData, int scale) {
+    public void populateFromPixelData(BlockState sourceState, short[] pixelData, int scale,
+                                      ServerLevel megablockLevel, BlockPos megablockOrigin) {
         this.scale = scale;
-        Map<Integer, MiniatureVoxel> next = new HashMap<>();
+        Map<Integer, MiniatureVoxel> nextVoxels = new HashMap<>();
+        Map<Integer, Float> nextHardness = new HashMap<>();
+
+        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
         for (int i = 0; i < pixelData.length; i++) {
             short packed = pixelData[i];
             if (packed == 0) continue;
-            next.put(i, MiniatureVoxel.sampled(sourceState, packed));
+            nextVoxels.put(i, MiniatureVoxel.sampled(sourceState, packed));
+
+            if (megablockLevel != null && megablockOrigin != null) {
+                int x = i % scale;
+                int rem = i / scale;
+                int z = rem % scale;
+                int y = rem / scale;
+                mp.set(megablockOrigin.getX() + x,
+                        megablockOrigin.getY() + y,
+                        megablockOrigin.getZ() + z);
+                BlockState mState = megablockLevel.getBlockState(mp);
+                float h = mState.getDestroySpeed(megablockLevel, mp);
+                nextHardness.put(i, h);
+            }
         }
-        this.voxels = Map.copyOf(next);
+
+        this.voxels = Map.copyOf(nextVoxels);
+        this.voxelHardness = Map.copyOf(nextHardness);
         invalidateShapeCache();
         setChanged();
 
+        if (level instanceof ServerLevel serverLevel) {
+            serverLevel.scheduleTick(worldPosition, getBlockState().getBlock(), 1);
+        }
+    }
+
+    public void updateVoxels(Map<Integer, MiniatureVoxel> next) {
+        this.voxels = Map.copyOf(next);
+        Map<Integer, Float> pruned = new HashMap<>();
+        for (Integer key : next.keySet()) {
+            Float h = voxelHardness.get(key);
+            if (h != null) pruned.put(key, h);
+        }
+        this.voxelHardness = Map.copyOf(pruned);
+        invalidateShapeCache();
+        setChanged();
         if (level instanceof ServerLevel serverLevel) {
             serverLevel.scheduleTick(worldPosition, getBlockState().getBlock(), 1);
         }
@@ -145,29 +133,37 @@ public class MiniatureBlockEntity extends BlockEntity {
         }
     }
 
-    // ---- Slow path (kept for future event-driven live sync). ----
+    // ---- Slow path (kept for later event-driven sync). ----
 
     public void refreshFrom(ServerLevel source, BlockPos origin, int scale) {
         int cx = origin.getX() >> 4;
         int cz = origin.getZ() >> 4;
         source.getChunk(cx, cz, ChunkStatus.FULL, true);
 
-        Map<Integer, MiniatureVoxel> next = new HashMap<>();
+        Map<Integer, MiniatureVoxel> nextVoxels = new HashMap<>();
+        Map<Integer, Float> nextHardness = new HashMap<>();
+
+        BlockPos.MutableBlockPos mp = new BlockPos.MutableBlockPos();
         for (int x = 0; x < scale; x++) {
             for (int y = 0; y < scale; y++) {
                 for (int z = 0; z < scale; z++) {
                     BlockPos p = origin.offset(x, y, z);
-                    MiniatureVoxel vox = resolveVoxel(source, p, scale);
-                    if (vox == null) continue;
+                    MiniatureVoxel v = resolveVoxel(source, p, scale);
+                    if (v == null) continue;
                     int idx = (y * scale + z) * scale + x;
-                    next.put(idx, vox);
+                    nextVoxels.put(idx, v);
+
+                    float h = source.getBlockState(p).getDestroySpeed(source, p);
+                    nextHardness.put(idx, h);
                 }
             }
         }
 
-        Map<Integer, MiniatureVoxel> immutableNext = Map.copyOf(next);
-        if (!immutableNext.equals(voxels)) {
-            voxels = immutableNext;
+        Map<Integer, MiniatureVoxel> immutableNextV = Map.copyOf(nextVoxels);
+        Map<Integer, Float> immutableNextH = Map.copyOf(nextHardness);
+        if (!immutableNextV.equals(voxels) || !immutableNextH.equals(voxelHardness)) {
+            voxels = immutableNextV;
+            voxelHardness = immutableNextH;
             invalidateShapeCache();
             setChanged();
             if (level instanceof ServerLevel serverLevel) {
@@ -222,7 +218,47 @@ public class MiniatureBlockEntity extends BlockEntity {
         refreshFrom(src, sourceOrigin, scale);
     }
 
-    // ---- Client render refresh ----
+    // ---- Collision shape ----
+
+    public VoxelShape getCollisionShape() {
+        VoxelShape cached = collisionShapeCache;
+        if (cached != null) return cached;
+
+        Map<Integer, MiniatureVoxel> v = voxels;
+        int s = scale;
+        if (v.isEmpty() || s <= 0) {
+            VoxelShape empty = Shapes.empty();
+            collisionShapeCache = empty;
+            return empty;
+        }
+
+        if (v.size() == s * s * s) {
+            VoxelShape full = Shapes.block();
+            collisionShapeCache = full;
+            return full;
+        }
+
+        double vs = 1.0 / s;
+        VoxelShape shape = Shapes.empty();
+        for (Integer idxObj : v.keySet()) {
+            int idx = idxObj;
+            int x = idx % s;
+            int rem = idx / s;
+            int z = rem % s;
+            int y = rem / s;
+            double x0 = x * vs, y0 = y * vs, z0 = z * vs;
+            VoxelShape box = Shapes.box(x0, y0, z0, x0 + vs, y0 + vs, z0 + vs);
+            shape = Shapes.joinUnoptimized(shape, box, BooleanOp.OR);
+        }
+
+        VoxelShape result = shape.optimize();
+        collisionShapeCache = result;
+        return result;
+    }
+
+    private void invalidateShapeCache() {
+        collisionShapeCache = null;
+    }
 
     @OnlyIn(Dist.CLIENT)
     private void refreshClientRender() {
@@ -237,7 +273,11 @@ public class MiniatureBlockEntity extends BlockEntity {
         );
     }
 
-    // ---- NBT ----
+    // ---- Compact NBT serialization ----
+    // Palette + packed long per voxel. Replaces a ListTag of CompoundTags
+    // (which was ~90 bytes per voxel) with a packed long (~8 bytes) plus a
+    // shared palette for unique block states. This keeps the mini's update
+    // tag under the chunk packet size limit.
 
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
@@ -251,17 +291,52 @@ public class MiniatureBlockEntity extends BlockEntity {
             tag.putLong("SourceOrigin", sourceOrigin.asLong());
         }
 
-        ListTag list = new ListTag();
+        ArrayList<BlockState> palette = new ArrayList<>();
+        HashMap<BlockState, Integer> paletteLookup = new HashMap<>();
+        palette.add(Blocks.AIR.defaultBlockState());
+        paletteLookup.put(Blocks.AIR.defaultBlockState(), 0);
+
+        int n = voxels.size();
+        long[] packed = new long[n];
+        int[] hardnessBits = new int[n];
+
+        int i = 0;
         for (Map.Entry<Integer, MiniatureVoxel> e : voxels.entrySet()) {
-            CompoundTag entry = new CompoundTag();
-            entry.putInt("Index", e.getKey());
+            int idx = e.getKey();
             MiniatureVoxel v = e.getValue();
-            entry.put("State", NbtUtils.writeBlockState(v.state()));
-            entry.putShort("Pixel", v.pixel());
-            entry.putBoolean("Sampled", v.sampled());
-            list.add(entry);
+
+            Integer pObj = paletteLookup.get(v.state());
+            int p;
+            if (pObj == null) {
+                if (palette.size() >= 256) {
+                    p = 0;
+                } else {
+                    p = palette.size();
+                    palette.add(v.state());
+                    paletteLookup.put(v.state(), p);
+                }
+            } else {
+                p = pObj;
+            }
+
+            long pack = ((long)(idx & 0xFFF))
+                    | ((long)(p & 0xFF) << 12)
+                    | ((long)(v.pixel() & 0xFFFF) << 20)
+                    | ((long)(v.sampled() ? 1 : 0) << 36);
+            packed[i] = pack;
+
+            Float h = voxelHardness.get(idx);
+            hardnessBits[i] = h != null ? Float.floatToIntBits(h) : 0;
+            i++;
         }
-        tag.put("Voxels", list);
+
+        ListTag paletteTag = new ListTag();
+        for (BlockState s : palette) {
+            paletteTag.add(NbtUtils.writeBlockState(s));
+        }
+        tag.put("Palette", paletteTag);
+        tag.putLongArray("Voxels", packed);
+        tag.putIntArray("Hardness", hardnessBits);
     }
 
     @Override
@@ -279,18 +354,54 @@ public class MiniatureBlockEntity extends BlockEntity {
             sourceOrigin = BlockPos.of(tag.getLong("SourceOrigin"));
         }
 
-        Map<Integer, MiniatureVoxel> next = new HashMap<>();
-        ListTag list = tag.getList("Voxels", Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entry = list.getCompound(i);
-            int idx = entry.getInt("Index");
-            BlockState state = NbtUtils.readBlockState(
-                    registries.lookupOrThrow(Registries.BLOCK), entry.getCompound("State"));
-            short pixel = entry.getShort("Pixel");
-            boolean sampled = entry.getBoolean("Sampled");
-            next.put(idx, new MiniatureVoxel(state, pixel, sampled));
+        // Only the compact format is supported. If an old world loads a
+        // mini saved with the CompoundTag-list format, it comes back empty
+        // rather than crashing.
+        if (!tag.contains("Voxels", Tag.TAG_LONG_ARRAY)) {
+            voxels = Map.of();
+            voxelHardness = Map.of();
+            invalidateShapeCache();
+            refreshClientRender();
+            return;
         }
-        voxels = Map.copyOf(next);
+
+        ListTag paletteTag = tag.getList("Palette", Tag.TAG_COMPOUND);
+        BlockState[] palette = new BlockState[paletteTag.size()];
+        for (int i = 0; i < paletteTag.size(); i++) {
+            palette[i] = NbtUtils.readBlockState(
+                    registries.lookupOrThrow(Registries.BLOCK),
+                    paletteTag.getCompound(i));
+        }
+
+        long[] packed = tag.getLongArray("Voxels");
+        int[] hardnessBits = tag.getIntArray("Hardness");
+
+        Map<Integer, MiniatureVoxel> nextV = new HashMap<>(Math.max(packed.length, 1));
+        Map<Integer, Float> nextH = new HashMap<>();
+
+        for (int i = 0; i < packed.length; i++) {
+            long p = packed[i];
+            int idx = (int)(p & 0xFFF);
+            int palIdx = (int)((p >> 12) & 0xFF);
+            int pixel = (int)((p >> 20) & 0xFFFF);
+            boolean sampled = ((p >> 36) & 1) != 0;
+
+            BlockState state = (palIdx < palette.length)
+                    ? palette[palIdx]
+                    : Blocks.AIR.defaultBlockState();
+            MiniatureVoxel v = sampled
+                    ? MiniatureVoxel.sampled(state, (short)pixel)
+                    : MiniatureVoxel.real(state);
+            nextV.put(idx, v);
+
+            if (i < hardnessBits.length) {
+                float h = Float.intBitsToFloat(hardnessBits[i]);
+                if (h != 0f) nextH.put(idx, h);
+            }
+        }
+
+        voxels = Map.copyOf(nextV);
+        voxelHardness = Map.copyOf(nextH);
         invalidateShapeCache();
 
         refreshClientRender();

@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8.5",
+  "package": "com.archetipe.microworld.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "LivingEntityWalkAnimationMixin",
+    "GameRendererProjectionMixin",
+    "ClientLevelParticleCullMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
